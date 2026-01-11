@@ -1,0 +1,77 @@
+
+fn alloc<T>() -> T* {
+    return malloc(sizeof(T));
+}
+
+fn zalloc<T>() -> T* {
+    return calloc(1, sizeof(T));
+}
+
+fn alloc_n<T>(n: usize) -> T* {
+    return malloc(sizeof(T) * n);
+}
+
+struct Box<T> {
+    ptr: T*;
+}
+
+impl Box<T> {
+    fn new() -> Self {
+        return Self { ptr: calloc(1, sizeof(T)) };
+    }
+    
+    fn from_ptr(p: T*) -> Self {
+        return Self { ptr: p };
+    }
+    
+    fn get(self) -> T* {
+        return self.ptr;
+    }
+    
+    fn is_null(self) -> bool {
+        return self.ptr == NULL;
+    }
+    
+    fn free(self) {
+        if self.ptr != NULL {
+            free(self.ptr);
+        }
+    }
+}
+
+struct Slice<T> {
+    data: T*;
+    len: usize;
+}
+
+impl Slice<T> {
+    fn new(data: T*, len: usize) -> Self {
+        return Self { data: data, len: len };
+    }
+    
+    fn get(self, i: usize) -> T {
+        return self.data[i];
+    }
+    
+    fn set(self, i: usize, val: T) {
+        self.data[i] = val;
+    }
+    
+    fn is_empty(self) -> bool {
+        return self.len == 0;
+    }
+}
+
+fn mem_zero<T>(ptr: T*, count: usize) {
+    memset(ptr, 0, sizeof(T) * count);
+}
+
+fn mem_copy<T>(dst: T*, src: T*, count: usize) {
+    memcpy(dst, src, sizeof(T) * count);
+}
+
+fn swap<T>(a: T*, b: T*) {
+    var tmp = *a;
+    *a = *b;
+    *b = tmp;
+}

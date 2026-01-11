@@ -1,0 +1,161 @@
+
+import "./core.zc"
+
+struct Vec<T> {
+    data: T*;
+    len: usize;
+    cap: usize;
+}
+
+impl Vec<T> {
+    fn new() -> Vec<T> {
+        return Vec<T> { data: 0, len: 0, cap: 0 };
+    }
+    
+    fn push(self, item: T) {
+        if (self.len >= self.cap) {
+            if (self.cap == 0) { self.cap = 8;
+            }
+            else { self.cap = self.cap * 2;
+            }
+            self.data = realloc(self.data, self.cap * sizeof(T));
+        }
+        self.data[self.len] = item;
+        self.len = self.len + 1;
+    }
+
+    fn insert(self, idx: usize, item: T) {
+        if (idx > self.len) {
+            !"Panic: Insert index out of bounds";
+            exit(1);
+        }
+        if (self.len >= self.cap) {
+            if (self.cap == 0) { self.cap = 8;
+            }
+            else { self.cap = self.cap * 2;
+            }
+            self.data = realloc(self.data, self.cap * sizeof(T));
+        }
+        // Shift elements right
+        if (idx < self.len) {
+             memmove(self.data + idx + 1, self.data + idx, (self.len - idx) * sizeof(T));
+        }
+        self.data[idx] = item;
+        self.len = self.len + 1;
+    }
+
+    fn pop(self) -> T {
+        if (self.len == 0) {
+            !"Panic: pop called on empty Vec";
+            exit(1);
+        }
+        self.len = self.len - 1;
+        return self.data[self.len];
+    }
+
+    fn remove(self, idx: usize) -> T {
+        if (idx >= self.len) {
+             !"Panic: Remove index out of bounds";
+             exit(1);
+        }
+        var item = self.data[idx];
+        // Shift elements left
+        if (idx < self.len - 1) {
+            memmove(self.data + idx, self.data + idx + 1, (self.len - idx - 1) * sizeof(T));
+        }
+        self.len = self.len - 1;
+        return item;
+    }
+
+    fn get(self, idx: usize) -> T {
+        if (idx >= self.len) {
+            !"Panic: Index out of bounds";
+            exit(1);
+        }
+        return self.data[idx];
+    }
+
+    fn last(self) -> T {
+        if (self.len == 0) {
+            !"Panic: last called on empty Vec";
+            exit(1);
+        }
+        return self.data[self.len - 1];
+    }
+
+    fn length(self) -> usize {
+        return self.len;
+    }
+
+    fn contains(self, item: T) -> bool {
+        var i: usize = 0;
+        while i < self.len {
+            if self.data[i] == item { return true; }
+            i++;
+        }
+        return false;
+    }
+
+    fn is_empty(self) -> bool {
+        return self.len == 0;
+    }
+
+    fn clear(self) {
+        self.len = 0;
+    }
+    
+    fn free(self) {
+        if (self.data) free(self.data);
+        self.data = 0;
+        self.len = 0;
+        self.cap = 0;
+    }
+    
+    fn first(self) -> T {
+        if (self.len == 0) {
+            !"Panic: first called on empty Vec";
+            exit(1);
+        }
+        return self.data[0];
+    }
+    
+    fn set(self, idx: usize, item: T) {
+        if (idx >= self.len) {
+            !"Panic: set index out of bounds";
+            exit(1);
+        }
+        self.data[idx] = item;
+    }
+    
+    fn reverse(self) {
+        var i: usize = 0;
+        var j = self.len - 1;
+        while i < j {
+            var tmp = self.data[i];
+            self.data[i] = self.data[j];
+            self.data[j] = tmp;
+            i++;
+            j--;
+        }
+    }
+    
+    fn eq(self, other: Vec<T>) -> bool {
+        if self.len != other.len { return false; }
+        var i: usize = 0;
+        while i < self.len {
+            if self.data[i] != other.data[i] { return false; }
+            i = i + 1;
+        }
+        return true;
+    }
+
+    fn clone(self) -> Vec<T> {
+        var new_vec: Vec<T> = Vec<T>::new();
+        var i: usize = 0;
+        while i < self.len {
+            new_vec.push(self.data[i]);
+            i = i + 1;
+        }
+        return new_vec;
+    }
+}

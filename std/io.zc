@@ -1,0 +1,43 @@
+
+import "./core.zc"
+
+raw {
+    char* format(const char* fmt, ...) {
+        static char buffer[1024];
+        va_list args;
+        va_start(args, fmt);
+        vsnprintf(buffer, sizeof(buffer), fmt, args);
+        va_end(args);
+        return buffer;
+    }
+    
+    char* format_new(const char* fmt, ...) {
+        char* buffer = malloc(1024);
+        va_list args;
+        va_start(args, fmt);
+        vsnprintf(buffer, 1024, fmt, args);
+        va_end(args);
+        return buffer;
+    }
+}
+
+raw {
+    char* readln() {
+        char* line = NULL;
+        size_t len = 0;
+        ssize_t read;
+        
+        read = getline(&line, &len, stdin);
+        
+        if (read != -1) {
+            // Remove newline if present
+            if (line[read - 1] == '\n') {
+                line[read - 1] = '\0';
+            }
+            return line;
+        }
+        
+        if (line) free(line);
+        return NULL;
+    }
+}

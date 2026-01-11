@@ -1,0 +1,112 @@
+
+import "./core.zc"
+import "./vec.zc"
+import "./option.zc"
+
+struct String {
+    vec: Vec<char>;
+}
+
+impl String {
+    fn new(s: char*) -> String {
+        var len = strlen(s);
+        var v = Vec<char>::new();
+        // Manual copy for now
+        for (var i = 0; i < len; i = i + 1) {
+            v.push(s[i]);
+        }
+        v.push(0);
+        return String { vec: v };
+    }
+
+    fn from(s: char*) -> String {
+        return String::new(s);
+    }
+
+    fn c_str(self) -> char* {
+        return self.vec.data;
+    }
+    
+    fn append(self, other: String) {
+        self.vec.len = self.vec.len - 1;
+        var other_len = other.vec.len;
+        for (var i = 0; i < other_len; i = i + 1) {
+            self.vec.push(other.vec.get(i));
+        }
+    }
+
+    fn add(self, other: String) -> String {
+        var new_s = String::from(self.c_str());
+        new_s.append(other);
+        return new_s;
+    }
+
+    fn eq(self, other: String) -> bool {
+        return strcmp(self.c_str(), other.c_str()) == 0;
+    }
+
+    fn length(self) -> usize {
+        if (self.vec.len == 0) { return 0;
+        }
+        return self.vec.len - 1;
+        // Exclude null terminator
+    }
+    
+    fn substring(self, start: usize, len: usize) -> String {
+        if (start + len > self.length()) {
+            printf("Panic: substring out of bounds\n");
+            exit(1);
+        }
+        var v = Vec<char>::new();
+        // Manual copy
+        for (var i: usize = 0; i < len; i = i + 1) {
+             v.push(self.vec.get(start + i));
+        }
+        v.push(0);
+        return String { vec: v };
+    }
+
+    fn find(self, target: char) -> Option<usize> {
+        var len = self.length();
+        for (var i: usize = 0; i < len; i = i + 1) {
+            if (self.vec.get(i) == target) {
+                return Option<usize>::Some(i);
+            }
+        }
+        return Option<usize>::None();
+    }
+
+    fn print(self) {
+        "{self.c_str()}"..;
+    }
+
+    fn println(self) {
+        "{self.c_str()}";
+    }
+    
+    fn is_empty(self) -> bool {
+        return self.length() == 0;
+    }
+    
+    fn contains(self, target: char) -> bool {
+        return self.find(target).is_some();
+    }
+    
+    fn starts_with(self, prefix: char*) -> bool {
+        var plen = strlen(prefix);
+        if plen > self.length() { return false; }
+        return strncmp(self.c_str(), prefix, plen) == 0;
+    }
+    
+    fn ends_with(self, suffix: char*) -> bool {
+        var slen = strlen(suffix);
+        var len = self.length();
+        if slen > len { return false; }
+        var offset = (int)(len - slen);
+        return strcmp(self.c_str() + offset, suffix) == 0;
+    }
+    
+    fn free(self) {
+        self.vec.free();
+    }
+}

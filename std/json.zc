@@ -1,0 +1,250 @@
+
+import "./core.zc"
+import "./vec.zc"
+import "./map.zc"
+import "./string.zc"
+import "./result.zc"
+
+@derive(Eq)
+enum JsonType {
+    JSON_NULL,
+    JSON_BOOL,
+    JSON_NUMBER,
+    JSON_STRING,
+    JSON_ARRAY,
+    JSON_OBJECT
+}
+
+@derive(Eq)
+struct JsonValue {
+    kind: JsonType;
+    string_val: char*;
+    number_val: double;
+    bool_val: bool;
+    array_val: Vec<JsonValue*>*;
+    object_val: Map<JsonValue*>*;
+}
+
+raw {
+    Vec_JsonValuePtr Vec_JsonValuePtr_new();
+    void Vec_JsonValuePtr_push(Vec_JsonValuePtr* self, JsonValue* item);
+    Map_JsonValuePtr Map_JsonValuePtr_new();
+    void Map_JsonValuePtr_put(Map_JsonValuePtr* self, char* key, JsonValue* val);
+    
+    static void _json_skip_ws(const char** p) {
+        while (**p == ' ' || **p == '\t' || **p == '\n' || **p == '\r') (*p)++;
+    }
+    
+    static char* _json_parse_string(const char** p) {
+        if (**p != '"') return NULL;
+        (*p)++;
+        char buf[4096]; int len = 0;
+        while (**p && **p != '"') {
+            if (**p == '\\' && (*p)[1]) {
+                (*p)++;
+                char c = **p;
+                if (c == 'n') buf[len++] = '\n';
+                else if (c == 't') buf[len++] = '\t';
+                else if (c == 'r') buf[len++] = '\r';
+                else if (c == '"') buf[len++] = '"';
+                else if (c == '\\') buf[len++] = '\\';
+                else buf[len++] = c;
+            } else {
+                buf[len++] = **p;
+            }
+            (*p)++;
+        }
+        if (**p == '"') (*p)++;
+        buf[len] = '\0';
+        return strdup(buf);
+    }
+    
+    static struct JsonValue* _json_parse_value(const char** p);
+    
+    static struct JsonValue* _json_parse_array(const char** p) {
+        if (**p != '[') return NULL;
+        (*p)++;
+        struct JsonValue* arr = malloc(sizeof(struct JsonValue));
+        arr->kind = JsonType_JSON_ARRAY();
+        arr->string_val = 0; arr->number_val = 0; arr->bool_val = 0; arr->object_val = 0;
+        arr->array_val = malloc(sizeof(Vec_JsonValuePtr));
+        *(arr->array_val) = Vec_JsonValuePtr_new();
+        
+        _json_skip_ws(p);
+        if (**p == ']') { (*p)++; return arr; }
+        
+        while (1) {
+            _json_skip_ws(p);
+            struct JsonValue* val = _json_parse_value(p);
+            if (!val) return NULL;
+            Vec_JsonValuePtr_push(arr->array_val, val);
+            _json_skip_ws(p);
+            if (**p == ']') { (*p)++; return arr; }
+            if (**p != ',') return NULL;
+            (*p)++;
+        }
+    }
+    
+    static struct JsonValue* _json_parse_object(const char** p) {
+        if (**p != '{') return NULL;
+        (*p)++;
+        struct JsonValue* obj = malloc(sizeof(struct JsonValue));
+        obj->kind = JsonType_JSON_OBJECT();
+        obj->string_val = 0; obj->number_val = 0; obj->bool_val = 0; obj->array_val = 0;
+        obj->object_val = malloc(sizeof(Map_JsonValuePtr));
+        *(obj->object_val) = Map_JsonValuePtr_new();
+        
+        _json_skip_ws(p);
+        if (**p == '}') { (*p)++; return obj; }
+        
+        while (1) {
+            _json_skip_ws(p);
+            char* key = _json_parse_string(p);
+            if (!key) return NULL;
+            _json_skip_ws(p);
+            if (**p != ':') { free(key); return NULL; }
+            (*p)++;
+            _json_skip_ws(p);
+            struct JsonValue* val = _json_parse_value(p);
+            if (!val) { free(key); return NULL; }
+            Map_JsonValuePtr_put(obj->object_val, key, val);
+            free(key);
+            _json_skip_ws(p);
+            if (**p == '}') { (*p)++; return obj; }
+            if (**p != ',') return NULL;
+            (*p)++;
+        }
+    }
+    
+    static struct JsonValue* _json_parse_value(const char** p) {
+        _json_skip_ws(p);
+        if (**p == '\0') return NULL;
+        
+        if (strncmp(*p, "null", 4) == 0) {
+            *p += 4;
+            struct JsonValue* v = malloc(sizeof(struct JsonValue));
+            v->kind = JsonType_JSON_NULL();
+            v->string_val = 0; v->number_val = 0; v->bool_val = 0; v->array_val = 0; v->object_val = 0;
+            return v;
+        }
+        if (strncmp(*p, "true", 4) == 0) {
+            *p += 4;
+            struct JsonValue* v = malloc(sizeof(struct JsonValue));
+            v->kind = JsonType_JSON_BOOL();
+            v->string_val = 0; v->number_val = 0; v->bool_val = 1; v->array_val = 0; v->object_val = 0;
+            return v;
+        }
+        if (strncmp(*p, "false", 5) == 0) {
+            *p += 5;
+            struct JsonValue* v = malloc(sizeof(struct JsonValue));
+            v->kind = JsonType_JSON_BOOL();
+            v->string_val = 0; v->number_val = 0; v->bool_val = 0; v->array_val = 0; v->object_val = 0;
+            return v;
+        }
+        if (**p == '"') {
+            char* s = _json_parse_string(p);
+            if (!s) return NULL;
+            struct JsonValue* v = malloc(sizeof(struct JsonValue));
+            v->kind = JsonType_JSON_STRING();
+            v->string_val = s; v->number_val = 0; v->bool_val = 0; v->array_val = 0; v->object_val = 0;
+            return v;
+        }
+        if (**p == '-' || (**p >= '0' && **p <= '9')) {
+            char* end;
+            double num = strtod(*p, &end);
+            if (end == *p) return NULL;
+            *p = end;
+            struct JsonValue* v = malloc(sizeof(struct JsonValue));
+            v->kind = JsonType_JSON_NUMBER();
+            v->string_val = 0; v->number_val = num; v->bool_val = 0; v->array_val = 0; v->object_val = 0;
+            return v;
+        }
+        if (**p == '[') return _json_parse_array(p);
+        if (**p == '{') return _json_parse_object(p);
+        return NULL;
+    }
+    
+    struct JsonValue* _json_do_parse(const char* json) {
+        const char* ptr = json;
+        return _json_parse_value(&ptr);
+    }
+}
+
+impl JsonValue {
+    fn null() -> JsonValue {
+        return JsonValue { kind: JsonType::JSON_NULL(), string_val: 0, number_val: 0, bool_val: false, array_val: 0, object_val: 0 };
+    }
+    
+    fn bool(b: bool) -> JsonValue {
+        return JsonValue { kind: JsonType::JSON_BOOL(), string_val: 0, number_val: 0, bool_val: b, array_val: 0, object_val: 0 };
+    }
+    
+    fn number(n: double) -> JsonValue {
+        return JsonValue { kind: JsonType::JSON_NUMBER(), string_val: 0, number_val: n, bool_val: false, array_val: 0, object_val: 0 };
+    }
+    
+    fn string(s: char*) -> JsonValue {
+        return JsonValue { kind: JsonType::JSON_STRING(), string_val: strdup(s), number_val: 0, bool_val: false, array_val: 0, object_val: 0 };
+    }
+    
+    fn array() -> JsonValue {
+        var v: Vec<JsonValue*>* = malloc(sizeof(Vec_JsonValuePtr));
+        *v = Vec_JsonValuePtr::new();
+        return JsonValue { kind: JsonType::JSON_ARRAY(), string_val: 0, number_val: 0, bool_val: false, array_val: v, object_val: 0 };
+    }
+    
+    fn object() -> JsonValue {
+        var m: Map<JsonValue*>* = malloc(sizeof(Map_JsonValuePtr));
+        *m = Map_JsonValuePtr::new();
+        return JsonValue { kind: JsonType::JSON_OBJECT(), string_val: 0, number_val: 0, bool_val: false, array_val: 0, object_val: m };
+    }
+    
+    fn push(self, val: JsonValue) {
+        if (self.kind.tag != JsonType::JSON_ARRAY().tag) return;
+        var p: JsonValue* = malloc(sizeof(JsonValue));
+        *p = val;
+        self.array_val.push(p);
+    }
+    
+    fn set(self, key: char*, val: JsonValue) {
+        if (self.kind.tag != JsonType::JSON_OBJECT().tag) return;
+        var p: JsonValue* = malloc(sizeof(JsonValue));
+        *p = val;
+        self.object_val.put(key, p);
+    }
+    
+    fn parse(json: char*) -> Result<JsonValue*> {
+        var result: JsonValue* = _json_do_parse(json);
+        if (result != NULL) {
+            return Result<JsonValue*>::Ok(result);
+        }
+        return Result<JsonValue*>::Err("JSON parse error");
+    }
+    
+    fn free(self) {
+        if (self.kind.tag == JsonType::JSON_STRING().tag) free(self.string_val);
+        if (self.kind.tag == JsonType::JSON_ARRAY().tag) {
+             var v: Vec<JsonValue*>* = self.array_val;
+             for (var i: usize = 0; i < v.length(); i = i + 1) {
+                 var item: JsonValue* = v.get(i);
+                 item.free();
+                 free(item);
+             }
+             v.clear();
+             free(v.data);
+             free(v);
+        }
+        if (self.kind.tag == JsonType::JSON_OBJECT().tag) {
+             var m: Map<JsonValue*>* = self.object_val;
+             for (var i: usize = 0; i < m.capacity(); i = i + 1) {
+                 if (m.is_slot_occupied(i)) {
+                     var child: JsonValue* = m.val_at(i);
+                     child.free();
+                     free(child);
+                 }
+             }
+             m.free();
+             free(m);
+        }
+    }
+}
