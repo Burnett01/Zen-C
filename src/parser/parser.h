@@ -377,7 +377,7 @@ void init_builtins();
 
 // Expression rewriting
 char *rewrite_expr_methods(ParserContext *ctx, char *raw);
-char *process_fstring(ParserContext *ctx, const char *content);
+char *process_fstring(ParserContext *ctx, const char *content, char ***used_syms, int *count);
 char *instantiate_function_template(ParserContext *ctx, const char *name,
                                     const char *concrete_type);
 FuncSig *find_func(ParserContext *ctx, const char *name);
@@ -409,8 +409,8 @@ ASTNode *parse_guard(ParserContext *ctx, Lexer *l);
 ASTNode *parse_match(ParserContext *ctx, Lexer *l);
 ASTNode *parse_return(ParserContext *ctx, Lexer *l);
 
-char *process_printf_sugar(ParserContext *ctx, const char *content, int newline,
-                           const char *target);
+char *process_printf_sugar(ParserContext *ctx, const char *content, int newline, const char *target,
+                           char ***used_syms, int *count);
 ASTNode *parse_assert(ParserContext *ctx, Lexer *l);
 ASTNode *parse_defer(ParserContext *ctx, Lexer *l);
 ASTNode *parse_asm(ParserContext *ctx, Lexer *l);
