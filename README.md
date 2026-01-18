@@ -225,8 +225,8 @@ outer: loop {
     if done { break outer; }
 }
 
-// Repeat
-repeat 5 { ... }
+// Repeat N times
+for _ in 0..5 { ... }
 ```
 
 #### Advanced Control
@@ -358,12 +358,21 @@ var drawable: Drawable = &circle;
 ```
 
 #### Composition
-Use `use` to mixin fields from another struct.
+Use `use` to embed other structs. You can either mix them in (flatten fields) or name them (nest fields).
+
 ```zc
 struct Entity { id: int; }
+
 struct Player {
-    use Entity; // Adds 'id' field
+    // Mixin (Unnamed): Flattens fields
+    use Entity;  // Adds 'id' to Player directly
     name: string;
+}
+
+struct Match {
+    // Composition (Named): Nests fields
+    use p1: Player; // Accessed via match.p1
+    use p2: Player; // Accessed via match.p2
 }
 ```
 

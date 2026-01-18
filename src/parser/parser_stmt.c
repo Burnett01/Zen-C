@@ -382,7 +382,8 @@ ASTNode *parse_loop(ParserContext *ctx, Lexer *l)
 
 ASTNode *parse_repeat(ParserContext *ctx, Lexer *l)
 {
-    lexer_next(l);
+    Token t = lexer_next(l);
+    zwarn_at(t, "repeat is deprecated. Use 'for _ in 0..N' instead.");
     char *c = rewrite_expr_methods(ctx, parse_condition_raw(ctx, l));
     ASTNode *b = parse_block(ctx, l);
     ASTNode *n = ast_create(NODE_REPEAT);
@@ -3330,6 +3331,36 @@ ASTNode *parse_struct(ParserContext *ctx, Lexer *l, int is_union)
         if (t.type == TOK_USE)
         {
             lexer_next(l); // eat use
+
+            // Check for named use: use name: Type;
+            Token t1 = lexer_peek(l);
+            Token t2 = lexer_peek2(l);
+
+            if (t1.type == TOK_IDENT && t2.type == TOK_COLON)
+            {
+                // Named use -> Composition (Add field, don't flatten)
+                Token field_name = lexer_next(l);
+                lexer_next(l); // eat :
+                char *field_type_str = parse_type(ctx, l);
+                expect(l, TOK_SEMICOLON, "Expected ;");
+
+                ASTNode *nf = ast_create(NODE_FIELD);
+                nf->field.name = token_strdup(field_name);
+                nf->field.type = field_type_str;
+
+                if (!h)
+                {
+                    h = nf;
+                }
+                else
+                {
+                    tl->next = nf;
+                }
+                tl = nf;
+                continue;
+            }
+
+            // Normal use -> Mixin (Flatten)
             // Parse the type (e.g. Header<I32>)
             Type *use_type = parse_type_formal(ctx, l);
             char *use_name = type_to_string(use_type);
