@@ -4115,9 +4115,34 @@ ASTNode *parse_expr_prec(ParserContext *ctx, Lexer *l, Precedence min_prec)
                         }
                     }
 
+                    // Handle RHS (Argument 2) Auto-Ref if needed
+                    ASTNode *arg2 = rhs;
+                    if (sig->total_args > 1 && sig->arg_types[1] &&
+                        sig->arg_types[1]->kind == TYPE_POINTER)
+                    {
+                        Type *rt = rhs->type_info;
+                        int is_rhs_ptr = (rt && rt->kind == TYPE_POINTER);
+                        if (!is_rhs_ptr) // Need pointer, have value
+                        {
+                            int is_rvalue =
+                                (rhs->type == NODE_EXPR_CALL || rhs->type == NODE_EXPR_BINARY ||
+                                 rhs->type == NODE_EXPR_STRUCT_INIT ||
+                                 rhs->type == NODE_EXPR_CAST || rhs->type == NODE_MATCH);
+
+                            ASTNode *addr = ast_create(NODE_EXPR_UNARY);
+                            addr->unary.op = is_rvalue ? xstrdup("&_rval") : xstrdup("&");
+                            addr->unary.operand = rhs;
+                            if (rt)
+                            {
+                                addr->type_info = type_new_ptr(rt);
+                            }
+                            arg2 = addr;
+                        }
+                    }
+
                     call->call.args = arg1;
-                    arg1->next = rhs;
-                    rhs->next = NULL;
+                    arg1->next = arg2;
+                    arg2->next = NULL;
 
                     call->type_info = sig->ret_type;
                     call->resolved_type = type_to_string(sig->ret_type);

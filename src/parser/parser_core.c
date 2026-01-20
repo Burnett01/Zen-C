@@ -585,17 +585,19 @@ static ASTNode *generate_derive_impls(ParserContext *ctx, ASTNode *strct, char *
                         ASTNode *fdef = find_struct_def(ctx, ft);
                         if (fdef && fdef->type == NODE_ENUM)
                         {
-                            // Enum field: compare tags
+                            // Enum field: compare tags (pointer access via auto-deref)
                             sprintf(cmp, "self.%s.tag == other.%s.tag", fn, fn);
                         }
                         else if (fdef && fdef->type == NODE_STRUCT)
                         {
-                            // Struct field: use _eq function
-                            sprintf(cmp, "%s__eq(&self.%s, other.%s)", ft, fn, fn);
+                            // Struct field: use _eq function, pass addresses
+                            // self.field is L-value, other.field is L-value (auto-deref from pointer)
+                            // We need addresses of them: &self.field, &other.field
+                            sprintf(cmp, "%s__eq(&self.%s, &other.%s)", ft, fn, fn);
                         }
                         else
                         {
-                            // Primitive or unknown: use ==
+                            // Primitive or unknown: use == (auto-deref)
                             sprintf(cmp, "self.%s == other.%s", fn, fn);
                         }
                         strcat(body, cmp);
@@ -610,7 +612,8 @@ static ASTNode *generate_derive_impls(ParserContext *ctx, ASTNode *strct, char *
                 strcat(body, ";");
             }
             code = xmalloc(4096 + 1024);
-            sprintf(code, "impl %s { fn eq(self, other: %s) -> bool { %s } }", name, name, body);
+            // Updated signature: other is a pointer T*
+            sprintf(code, "impl %s { fn eq(self, other: %s*) -> bool { %s } }", name, name, body);
         }
         else if (0 == strcmp(trait, "Debug"))
         {

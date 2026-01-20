@@ -662,7 +662,15 @@ Decorate functions and structs to modify compiler behavior.
 | `@weak` | Fn | Weak symbol linkage. |
 | `@section("name")` | Fn | Place code in specific section. |
 | `@noreturn` | Fn | Function does not return (e.g. exit). |
-| `@derived(...)` | Struct | Auto-implement traits (e.g. `Debug`). |
+| `@derive(...)` | Struct | Auto-implement traits. Supports `Debug`, `Eq` (Smart Derive), `Copy`, `Clone`. |
+
+### Smart Derives
+
+Zen C provides "Smart Derives" that respect Move Semantics:
+
+- **`@derive(Eq)`**: Generates an equality method that takes arguments by reference (`fn eq(self, other: T*)`).
+    - When comparing two non-Copy structs (`a == b`), the compiler automatically passes `b` by reference (`&b`) to avoid moving it.
+    - Recursive equality checks on fields also prefer pointer access to prevent ownership transfer.
 
 ### 14. Inline Assembly
 

@@ -461,7 +461,7 @@ void codegen_expression(ParserContext *ctx, ASTNode *node, FILE *out)
                 }
                 fprintf(out, "%s__eq(&", base);
                 codegen_expression(ctx, node->binary.left, out);
-                fprintf(out, ", ");
+                fprintf(out, ", &");
                 codegen_expression(ctx, node->binary.right, out);
                 fprintf(out, ")");
                 if (strcmp(node->binary.op, "!=") == 0)

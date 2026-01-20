@@ -9,7 +9,7 @@ fn test_empty_struct() {
     var e1 = Empty {};
     var e2 = Empty {};
     
-    if (!e1.eq(e2)) {
+    if (!e1.eq(&e2)) {
         println "FAIL: Empty struct eq failed";
         exit(1);
     }
@@ -35,12 +35,12 @@ fn test_many_fields() {
     var m2 = ManyFields { a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8 };
     var m3 = ManyFields { a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 9 }; // h differs
     
-    if (!m1.eq(m2)) {
+    if (!m1.eq(&m2)) {
         println "FAIL: equal structs not detected as equal";
         exit(1);
     }
     
-    if (m1.eq(m3)) {
+    if (m1.eq(&m3)) {
         println "FAIL: different structs detected as equal";
         exit(1);
     }
