@@ -263,10 +263,11 @@ struct ParserContext
     int extern_symbol_count;
 
     // Codegen state:
-    FILE *hoist_out;   // For plugins to hoist code to file scope
-    int skip_preamble; // If 1, codegen_node(NODE_ROOT) won't emit preamble
-    int is_repl;       // REPL mode flag
-    int has_async;     // Track if async features are used
+    FILE *hoist_out;    // For plugins to hoist code to file scope
+    int skip_preamble;  // If 1, codegen_node(NODE_ROOT) won't emit preamble
+    int is_repl;        // REPL mode flag
+    int has_async;      // Track if async features are used
+    int in_defer_block; // Track if currently parsing inside a defer block
 };
 
 // Token helpers

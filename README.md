@@ -422,11 +422,13 @@ println "You are {age} years old.";
 Zen C allows manual memory management with ergonomic aids.
 
 #### Defer
-Execute code when the current scope exits.
+Execute code when the current scope exits. Defer statements are executed in LIFO (last-in, first-out) order.
 ```zc
 var f = fopen("file.txt", "r");
 defer fclose(f);
 ```
+
+> To prevent undefined behavior, control flow statements (`return`, `break`, `continue`, `goto`) are **not allowed** inside a `defer` block.
 
 #### Autofree
 Automatically free the variable when scope exits.

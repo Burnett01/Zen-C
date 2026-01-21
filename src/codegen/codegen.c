@@ -1920,12 +1920,18 @@ void codegen_node_single(ParserContext *ctx, ASTNode *node, FILE *out)
         codegen_node_single(ctx, node->guard_stmt.body, out);
         break;
     case NODE_WHILE:
+    {
+        loop_defer_boundary[loop_depth++] = defer_count;
         fprintf(out, "while (");
         codegen_expression(ctx, node->while_stmt.condition, out);
         fprintf(out, ") ");
         codegen_node_single(ctx, node->while_stmt.body, out);
+        loop_depth--;
         break;
+    }
     case NODE_FOR:
+    {
+        loop_defer_boundary[loop_depth++] = defer_count;
         fprintf(out, "for (");
         if (node->for_stmt.init)
         {
@@ -1963,8 +1969,19 @@ void codegen_node_single(ParserContext *ctx, ASTNode *node, FILE *out)
         }
         fprintf(out, ") ");
         codegen_node_single(ctx, node->for_stmt.body, out);
+        loop_depth--;
         break;
+    }
     case NODE_BREAK:
+        // Run defers from current scope down to loop boundary before breaking
+        if (loop_depth > 0)
+        {
+            int boundary = loop_defer_boundary[loop_depth - 1];
+            for (int i = defer_count - 1; i >= boundary; i--)
+            {
+                codegen_node_single(ctx, defer_stack[i], out);
+            }
+        }
         if (node->break_stmt.target_label)
         {
             fprintf(out, "goto __break_%s;\n", node->break_stmt.target_label);
@@ -1975,6 +1992,15 @@ void codegen_node_single(ParserContext *ctx, ASTNode *node, FILE *out)
         }
         break;
     case NODE_CONTINUE:
+        // Run defers from current scope down to loop boundary before continuing
+        if (loop_depth > 0)
+        {
+            int boundary = loop_defer_boundary[loop_depth - 1];
+            for (int i = defer_count - 1; i >= boundary; i--)
+            {
+                codegen_node_single(ctx, defer_stack[i], out);
+            }
+        }
         if (node->continue_stmt.target_label)
         {
             fprintf(out, "goto __continue_%s;\n", node->continue_stmt.target_label);
@@ -2001,23 +2027,39 @@ void codegen_node_single(ParserContext *ctx, ASTNode *node, FILE *out)
         fprintf(out, "%s:;\n", node->label_stmt.label_name);
         break;
     case NODE_DO_WHILE:
+    {
+        loop_defer_boundary[loop_depth++] = defer_count;
         fprintf(out, "do ");
         codegen_node_single(ctx, node->do_while_stmt.body, out);
         fprintf(out, " while (");
         codegen_expression(ctx, node->do_while_stmt.condition, out);
         fprintf(out, ");\n");
+        loop_depth--;
         break;
+    }
     // Loop constructs: loop, repeat, for-in
     case NODE_LOOP:
+    {
         // loop { ... } => while (1) { ... }
+        loop_defer_boundary[loop_depth++] = defer_count;
         fprintf(out, "while (1) ");
         codegen_node_single(ctx, node->loop_stmt.body, out);
+        loop_depth--;
         break;
+    }
     case NODE_REPEAT:
+    {
+        loop_defer_boundary[loop_depth++] = defer_count;
         fprintf(out, "for (int _rpt_i = 0; _rpt_i < (%s); _rpt_i++) ", node->repeat_stmt.count);
         codegen_node_single(ctx, node->repeat_stmt.body, out);
+        loop_depth--;
         break;
+    }
     case NODE_FOR_RANGE:
+    {
+        // Track loop entry for defer boundary
+        loop_defer_boundary[loop_depth++] = defer_count;
+
         fprintf(out, "for (");
         if (strstr(g_config.cc, "tcc"))
         {
@@ -2049,7 +2091,10 @@ void codegen_node_single(ParserContext *ctx, ASTNode *node, FILE *out)
             fprintf(out, "++) ");
         }
         codegen_node_single(ctx, node->for_range.body, out);
+
+        loop_depth--;
         break;
+    }
     case NODE_ASM:
     {
         int is_extended = (node->asm_stmt.num_outputs > 0 || node->asm_stmt.num_inputs > 0 ||
@@ -2229,9 +2274,9 @@ void codegen_node_single(ParserContext *ctx, ASTNode *node, FILE *out)
     }
     case NODE_RETURN:
     {
+        int has_defers = (defer_count > func_defer_boundary);
         int handled = 0;
-        // If returning a variable that implements Drop, we must zero it out
-        // to prevent the cleanup attribute from destroying the resource we just returned.
+
         if (node->ret.value && node->ret.value->type == NODE_EXPR_VAR)
         {
             char *tname = infer_type(ctx, node->ret.value);
@@ -2261,7 +2306,13 @@ void codegen_node_single(ParserContext *ctx, ASTNode *node, FILE *out)
                     codegen_expression(ctx, node->ret.value, out);
                     fprintf(out, "; memset(&");
                     codegen_expression(ctx, node->ret.value, out);
-                    fprintf(out, ", 0, sizeof(_z_ret_mv)); _z_ret_mv; });\n");
+                    fprintf(out, ", 0, sizeof(_z_ret_mv)); ");
+                    // Run defers before returning
+                    for (int i = defer_count - 1; i >= func_defer_boundary; i--)
+                    {
+                        codegen_node_single(ctx, defer_stack[i], out);
+                    }
+                    fprintf(out, "_z_ret_mv; });\n");
                     handled = 1;
                 }
                 free(tname);
@@ -2270,9 +2321,36 @@ void codegen_node_single(ParserContext *ctx, ASTNode *node, FILE *out)
 
         if (!handled)
         {
-            fprintf(out, "    return ");
-            codegen_expression(ctx, node->ret.value, out);
-            fprintf(out, ";\n");
+            if (has_defers && node->ret.value)
+            {
+                // Save return value, run defers, then return
+                fprintf(out, "    { ");
+                emit_auto_type(ctx, node->ret.value, node->token, out);
+                fprintf(out, " _z_ret = ");
+                codegen_expression(ctx, node->ret.value, out);
+                fprintf(out, "; ");
+                for (int i = defer_count - 1; i >= func_defer_boundary; i--)
+                {
+                    codegen_node_single(ctx, defer_stack[i], out);
+                }
+                fprintf(out, "return _z_ret; }\n");
+            }
+            else if (has_defers)
+            {
+                // No return value, just run defers
+                for (int i = defer_count - 1; i >= func_defer_boundary; i--)
+                {
+                    codegen_node_single(ctx, defer_stack[i], out);
+                }
+                fprintf(out, "    return;\n");
+            }
+            else
+            {
+                // No defers, simple return
+                fprintf(out, "    return ");
+                codegen_expression(ctx, node->ret.value, out);
+                fprintf(out, ";\n");
+            }
         }
         break;
     }

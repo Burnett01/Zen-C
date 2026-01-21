@@ -48,6 +48,11 @@ extern int defer_count;
 extern ASTNode *defer_stack[];
 extern ASTNode *g_current_lambda;
 
+// Defer boundary tracking for proper defer execution on break/continue/return
 #define MAX_DEFER 1024
+#define MAX_LOOP_DEPTH 64
+extern int loop_defer_boundary[]; // defer_count at each loop entry
+extern int loop_depth;            // current loop nesting depth
+extern int func_defer_boundary;   // defer_count at function entry
 
 #endif

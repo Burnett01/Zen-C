@@ -16,6 +16,10 @@ ASTNode *defer_stack[MAX_DEFER];
 int defer_count = 0;
 ASTNode *g_current_lambda = NULL;
 
+int loop_defer_boundary[MAX_LOOP_DEPTH];
+int loop_depth = 0;
+int func_defer_boundary = 0;
+
 // Helper to emit variable declarations with array types.
 void emit_var_decl_type(ParserContext *ctx, FILE *out, const char *type_str, const char *var_name)
 {

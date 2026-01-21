@@ -502,7 +502,12 @@ ASTNode *parse_guard(ParserContext *ctx, Lexer *l)
 
 ASTNode *parse_defer(ParserContext *ctx, Lexer *l)
 {
-    lexer_next(l); // defer
+    Token defer_token = lexer_next(l); // defer
+
+    // Track that we're parsing inside a defer block
+    int prev_in_defer = ctx->in_defer_block;
+    ctx->in_defer_block = 1;
+
     ASTNode *s;
     if (lexer_peek(l).type == TOK_LBRACE)
     {
@@ -513,7 +518,11 @@ ASTNode *parse_defer(ParserContext *ctx, Lexer *l)
         s = ast_create(NODE_RAW_STMT);
         s->raw_stmt.content = consume_and_rewrite(ctx, l);
     }
+
+    ctx->in_defer_block = prev_in_defer;
+
     ASTNode *n = ast_create(NODE_DEFER);
+    n->token = defer_token;
     n->defer_stmt.stmt = s;
     return n;
 }
@@ -1465,7 +1474,6 @@ ASTNode *parse_type_alias(ParserContext *ctx, Lexer *l)
     lexer_next(l); // consume '='
 
     char *o = parse_type(ctx, l);
-    // printf("DEBUG: parse_type returned '%s'\n", o);
 
     lexer_next(l); // consume ';' (parse_type doesn't consume it? parse_type calls parse_type_formal
                    // which doesn't consume ;?)
@@ -1485,8 +1493,16 @@ ASTNode *parse_type_alias(ParserContext *ctx, Lexer *l)
 
 ASTNode *parse_return(ParserContext *ctx, Lexer *l)
 {
-    lexer_next(l); // eat 'return'
+    Token return_token = lexer_next(l); // eat 'return'
+
+    // Error if return is used inside a defer block
+    if (ctx->in_defer_block)
+    {
+        zpanic_at(return_token, "'return' is not allowed inside a 'defer' block");
+    }
+
     ASTNode *n = ast_create(NODE_RETURN);
+    n->token = return_token;
 
     int handled = 0;
 
@@ -2696,8 +2712,16 @@ ASTNode *parse_statement(ParserContext *ctx, Lexer *l)
         // Break with optional label: break; or break 'outer;
         if (strncmp(tk.start, "break", 5) == 0 && tk.len == 5)
         {
-            lexer_next(l);
+            Token break_token = lexer_next(l);
+
+            // Error if break is used inside a defer block
+            if (ctx->in_defer_block)
+            {
+                zpanic_at(break_token, "'break' is not allowed inside a 'defer' block");
+            }
+
             ASTNode *n = ast_create(NODE_BREAK);
+            n->token = break_token;
             n->break_stmt.target_label = NULL;
             // Check for 'label
             if (lexer_peek(l).type == TOK_CHAR)
@@ -2719,8 +2743,16 @@ ASTNode *parse_statement(ParserContext *ctx, Lexer *l)
         // Continue with optional label
         if (strncmp(tk.start, "continue", 8) == 0 && tk.len == 8)
         {
-            lexer_next(l);
+            Token continue_token = lexer_next(l);
+
+            // Error if continue is used inside a defer block
+            if (ctx->in_defer_block)
+            {
+                zpanic_at(continue_token, "'continue' is not allowed inside a 'defer' block");
+            }
+
             ASTNode *n = ast_create(NODE_CONTINUE);
+            n->token = continue_token;
             n->continue_stmt.target_label = NULL;
             if (lexer_peek(l).type == TOK_CHAR)
             {
@@ -2902,6 +2934,13 @@ ASTNode *parse_statement(ParserContext *ctx, Lexer *l)
         if (strncmp(tk.start, "goto", 4) == 0 && tk.len == 4)
         {
             Token goto_tok = lexer_next(l); // eat 'goto'
+
+            // Error if goto is used inside a defer block
+            if (ctx->in_defer_block)
+            {
+                zpanic_at(goto_tok, "'goto' is not allowed inside a 'defer' block");
+            }
+
             Token next = lexer_peek(l);
 
             // Computed goto: goto *ptr;
