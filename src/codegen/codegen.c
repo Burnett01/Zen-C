@@ -538,6 +538,106 @@ static void codegen_match_internal(ParserContext *ctx, ASTNode *node, FILE *out,
     }
 }
 
+// Emit literal expression (int, float, string, char)
+static void codegen_literal_expr(ASTNode *node, FILE *out)
+{
+    if (node->literal.type_kind == TOK_STRING)
+    {
+        fprintf(out, "\"%s\"", node->literal.string_val);
+    }
+    else if (node->literal.type_kind == TOK_CHAR)
+    {
+        fprintf(out, "%s", node->literal.string_val);
+    }
+    else if (node->literal.type_kind == 1) // float
+    {
+        fprintf(out, "%f", node->literal.float_val);
+    }
+    else // int
+    {
+        if (node->literal.int_val > 9223372036854775807ULL)
+        {
+            fprintf(out, "%lluULL", (unsigned long long)node->literal.int_val);
+        }
+        else
+        {
+            fprintf(out, "%llu", (unsigned long long)node->literal.int_val);
+        }
+    }
+}
+
+// Emit variable reference expression
+static void codegen_var_expr(ParserContext *ctx, ASTNode *node, FILE *out)
+{
+    (void)ctx; // May be used for context lookup in future
+
+    if (g_current_lambda)
+    {
+        for (int i = 0; i < g_current_lambda->lambda.num_captures; i++)
+        {
+            if (strcmp(node->var_ref.name, g_current_lambda->lambda.captured_vars[i]) == 0)
+            {
+                fprintf(out, "ctx->%s", node->var_ref.name);
+                return;
+            }
+        }
+    }
+
+    if (node->resolved_type && strcmp(node->resolved_type, "unknown") == 0)
+    {
+        if (node->var_ref.suggestion)
+        {
+            char msg[256];
+            sprintf(msg, "Undefined variable '%s'", node->var_ref.name);
+            char help[256];
+            sprintf(help, "Did you mean '%s'?", node->var_ref.suggestion);
+            zwarn_at(node->token, "%s\n   = help: %s", msg, help);
+        }
+    }
+    fprintf(out, "%s", node->var_ref.name);
+}
+
+// Emit lambda expression
+static void codegen_lambda_expr(ASTNode *node, FILE *out)
+{
+    if (node->lambda.num_captures > 0)
+    {
+        fprintf(out,
+                "({ struct Lambda_%d_Ctx *ctx = malloc(sizeof(struct "
+                "Lambda_%d_Ctx));\n",
+                node->lambda.lambda_id, node->lambda.lambda_id);
+        for (int i = 0; i < node->lambda.num_captures; i++)
+        {
+            fprintf(out, "ctx->%s = ", node->lambda.captured_vars[i]);
+            int found = 0;
+            if (g_current_lambda)
+            {
+                for (int k = 0; k < g_current_lambda->lambda.num_captures; k++)
+                {
+                    if (strcmp(node->lambda.captured_vars[i],
+                               g_current_lambda->lambda.captured_vars[k]) == 0)
+                    {
+                        fprintf(out, "ctx->%s", node->lambda.captured_vars[i]);
+                        found = 1;
+                        break;
+                    }
+                }
+            }
+            if (!found)
+            {
+                fprintf(out, "%s", node->lambda.captured_vars[i]);
+            }
+            fprintf(out, ";\n");
+        }
+        fprintf(out, "(z_closure_T){.func = _lambda_%d, .ctx = ctx}; })", node->lambda.lambda_id);
+    }
+    else
+    {
+        fprintf(out, "((z_closure_T){.func = (void*)_lambda_%d, .ctx = NULL})",
+                node->lambda.lambda_id);
+    }
+}
+
 void codegen_expression(ParserContext *ctx, ASTNode *node, FILE *out)
 {
     if (!node)
@@ -733,96 +833,13 @@ void codegen_expression(ParserContext *ctx, ASTNode *node, FILE *out)
         }
         break;
     case NODE_EXPR_VAR:
-        if (g_current_lambda)
-        {
-            for (int i = 0; i < g_current_lambda->lambda.num_captures; i++)
-            {
-                if (strcmp(node->var_ref.name, g_current_lambda->lambda.captured_vars[i]) == 0)
-                {
-                    fprintf(out, "ctx->%s", node->var_ref.name);
-                    return;
-                }
-            }
-        }
-
-        if (node->resolved_type && strcmp(node->resolved_type, "unknown") == 0)
-        {
-            if (node->var_ref.suggestion)
-            {
-                char msg[256];
-                sprintf(msg, "Undefined variable '%s'", node->var_ref.name);
-                char help[256];
-                sprintf(help, "Did you mean '%s'?", node->var_ref.suggestion);
-
-                zwarn_at(node->token, "%s\n   = help: %s", msg, help);
-            }
-        }
-        fprintf(out, "%s", node->var_ref.name);
+        codegen_var_expr(ctx, node, out);
         break;
     case NODE_LAMBDA:
-        if (node->lambda.num_captures > 0)
-        {
-            fprintf(out,
-                    "({ struct Lambda_%d_Ctx *ctx = malloc(sizeof(struct "
-                    "Lambda_%d_Ctx));\n",
-                    node->lambda.lambda_id, node->lambda.lambda_id);
-            for (int i = 0; i < node->lambda.num_captures; i++)
-            {
-                fprintf(out, "ctx->%s = ", node->lambda.captured_vars[i]);
-                int found = 0;
-                if (g_current_lambda)
-                {
-                    for (int k = 0; k < g_current_lambda->lambda.num_captures; k++)
-                    {
-                        if (strcmp(node->lambda.captured_vars[i],
-                                   g_current_lambda->lambda.captured_vars[k]) == 0)
-                        {
-                            fprintf(out, "ctx->%s", node->lambda.captured_vars[i]);
-                            found = 1;
-                            break;
-                        }
-                    }
-                }
-                if (!found)
-                {
-                    fprintf(out, "%s", node->lambda.captured_vars[i]);
-                }
-                fprintf(out, ";\n");
-            }
-            fprintf(out, "(z_closure_T){.func = _lambda_%d, .ctx = ctx}; })",
-                    node->lambda.lambda_id);
-        }
-        else
-        {
-            fprintf(out, "((z_closure_T){.func = (void*)_lambda_%d, .ctx = NULL})",
-                    node->lambda.lambda_id);
-        }
+        codegen_lambda_expr(node, out);
         break;
     case NODE_EXPR_LITERAL:
-        if (node->literal.type_kind == TOK_STRING)
-        {
-            fprintf(out, "\"%s\"", node->literal.string_val);
-        }
-        else if (node->literal.type_kind == TOK_CHAR)
-        {
-            fprintf(out, "%s", node->literal.string_val);
-        }
-        else if (node->literal.type_kind == 1)
-        {
-            fprintf(out, "%f", node->literal.float_val);
-        }
-
-        else
-        {
-            if (node->literal.int_val > 9223372036854775807ULL)
-            {
-                fprintf(out, "%lluULL", (unsigned long long)node->literal.int_val);
-            }
-            else
-            {
-                fprintf(out, "%llu", (unsigned long long)node->literal.int_val);
-            }
-        }
+        codegen_literal_expr(node, out);
         break;
     case NODE_EXPR_CALL:
     {

@@ -984,6 +984,196 @@ static ASTNode *create_fstring_block(ParserContext *ctx, const char *content)
     return block;
 }
 
+// Parse integer literal (decimal, hex, binary)
+static ASTNode *parse_int_literal(Token t)
+{
+    ASTNode *node = ast_create(NODE_EXPR_LITERAL);
+    node->literal.type_kind = 0;
+    node->type_info = type_new(TYPE_INT);
+    char *s = token_strdup(t);
+    unsigned long long val;
+    if (t.len > 2 && s[0] == '0' && s[1] == 'b')
+    {
+        val = strtoull(s + 2, NULL, 2);
+    }
+    else
+    {
+        val = strtoull(s, NULL, 0);
+    }
+    node->literal.int_val = val;
+    free(s);
+    return node;
+}
+
+// Parse float literal
+static ASTNode *parse_float_literal(Token t)
+{
+    ASTNode *node = ast_create(NODE_EXPR_LITERAL);
+    node->literal.type_kind = 1;
+    node->literal.float_val = atof(t.start);
+    node->type_info = type_new(TYPE_F64);
+    return node;
+}
+
+// Parse string literal
+static ASTNode *parse_string_literal(Token t)
+{
+    ASTNode *node = ast_create(NODE_EXPR_LITERAL);
+    node->literal.type_kind = TOK_STRING;
+    node->literal.string_val = xmalloc(t.len);
+    strncpy(node->literal.string_val, t.start + 1, t.len - 2);
+    node->literal.string_val[t.len - 2] = 0;
+    node->type_info = type_new(TYPE_STRING);
+    return node;
+}
+
+// Parse f-string literal
+static ASTNode *parse_fstring_literal(ParserContext *ctx, Token t)
+{
+    char *inner = xmalloc(t.len);
+    strncpy(inner, t.start + 2, t.len - 3);
+    inner[t.len - 3] = 0;
+    ASTNode *node = create_fstring_block(ctx, inner);
+    free(inner);
+    return node;
+}
+
+// Parse character literal
+static ASTNode *parse_char_literal(Token t)
+{
+    ASTNode *node = ast_create(NODE_EXPR_LITERAL);
+    node->literal.type_kind = TOK_CHAR;
+    node->literal.string_val = token_strdup(t);
+    node->type_info = type_new(TYPE_I8);
+    return node;
+}
+
+// Parse sizeof expression: sizeof(type) or sizeof(expr)
+static ASTNode *parse_sizeof_expr(ParserContext *ctx, Lexer *l)
+{
+    if (lexer_peek(l).type != TOK_LPAREN)
+    {
+        zpanic_at(lexer_peek(l), "Expected ( after sizeof");
+    }
+    lexer_next(l);
+
+    int pos = l->pos;
+    int col = l->col;
+    int line = l->line;
+    Type *ty = parse_type_formal(ctx, l);
+
+    ASTNode *node;
+    if (ty->kind != TYPE_UNKNOWN && lexer_peek(l).type == TOK_RPAREN)
+    {
+        lexer_next(l);
+        char *ts = type_to_string(ty);
+        node = ast_create(NODE_EXPR_SIZEOF);
+        node->size_of.target_type = ts;
+        node->size_of.expr = NULL;
+        node->type_info = type_new(TYPE_USIZE);
+    }
+    else
+    {
+        l->pos = pos;
+        l->col = col;
+        l->line = line;
+        ASTNode *ex = parse_expression(ctx, l);
+        if (lexer_next(l).type != TOK_RPAREN)
+        {
+            zpanic_at(lexer_peek(l), "Expected ) after sizeof identifier");
+        }
+        node = ast_create(NODE_EXPR_SIZEOF);
+        node->size_of.target_type = NULL;
+        node->size_of.expr = ex;
+        node->type_info = type_new(TYPE_USIZE);
+    }
+    return node;
+}
+
+// Parse typeof expression: typeof(type) or typeof(expr)
+static ASTNode *parse_typeof_expr(ParserContext *ctx, Lexer *l)
+{
+    if (lexer_peek(l).type != TOK_LPAREN)
+    {
+        zpanic_at(lexer_peek(l), "Expected ( after typeof");
+    }
+    lexer_next(l);
+
+    int pos = l->pos;
+    int col = l->col;
+    int line = l->line;
+    Type *ty = parse_type_formal(ctx, l);
+
+    ASTNode *node;
+    if (ty->kind != TYPE_UNKNOWN && lexer_peek(l).type == TOK_RPAREN)
+    {
+        lexer_next(l);
+        char *ts = type_to_string(ty);
+        node = ast_create(NODE_TYPEOF);
+        node->size_of.target_type = ts;
+        node->size_of.expr = NULL;
+    }
+    else
+    {
+        l->pos = pos;
+        l->col = col;
+        l->line = line;
+        ASTNode *ex = parse_expression(ctx, l);
+        if (lexer_next(l).type != TOK_RPAREN)
+        {
+            zpanic_at(lexer_peek(l), "Expected ) after typeof expression");
+        }
+        node = ast_create(NODE_TYPEOF);
+        node->size_of.target_type = NULL;
+        node->size_of.expr = ex;
+    }
+    return node;
+}
+
+// Parse intrinsic expression: @type_name(T), @fields(T)
+static ASTNode *parse_intrinsic(ParserContext *ctx, Lexer *l)
+{
+    Token ident = lexer_next(l);
+    if (ident.type != TOK_IDENT)
+    {
+        zpanic_at(ident, "Expected intrinsic name after @");
+    }
+
+    int kind = -1;
+    if (strncmp(ident.start, "type_name", 9) == 0 && ident.len == 9)
+    {
+        kind = 0;
+    }
+    else if (strncmp(ident.start, "fields", 6) == 0 && ident.len == 6)
+    {
+        kind = 1;
+    }
+    else
+    {
+        zpanic_at(ident, "Unknown intrinsic @%.*s", ident.len, ident.start);
+    }
+
+    Token lparen = lexer_next(l);
+    if (lparen.type != TOK_LPAREN)
+    {
+        zpanic_at(lparen, "Expected ( after intrinsic");
+    }
+
+    Type *target = parse_type_formal(ctx, l);
+
+    Token rparen = lexer_next(l);
+    if (rparen.type != TOK_RPAREN)
+    {
+        zpanic_at(rparen, "Expected ) after intrinsic type");
+    }
+
+    ASTNode *node = ast_create(NODE_REFLECTION);
+    node->reflection.kind = kind;
+    node->reflection.target_type = target;
+    node->type_info = (kind == 0) ? type_new(TYPE_STRING) : type_new_ptr(type_new(TYPE_VOID));
+    return node;
+}
+
 ASTNode *parse_primary(ParserContext *ctx, Lexer *l)
 {
     ASTNode *node = NULL;
@@ -994,174 +1184,38 @@ ASTNode *parse_primary(ParserContext *ctx, Lexer *l)
     // Literals
     if (t.type == TOK_INT)
     {
-        node = ast_create(NODE_EXPR_LITERAL);
-        node->literal.type_kind = 0;
-        node->type_info = type_new(TYPE_INT);
-        char *s = token_strdup(t);
-        unsigned long long val;
-        if (t.len > 2 && s[0] == '0' && s[1] == 'b')
-        {
-            val = strtoull(s + 2, NULL, 2);
-        }
-        else
-        {
-            val = strtoull(s, NULL, 0);
-        }
-        node->literal.int_val = (unsigned long long)val;
-        free(s);
+        node = parse_int_literal(t);
     }
     else if (t.type == TOK_FLOAT)
     {
-        node = ast_create(NODE_EXPR_LITERAL);
-        node->literal.type_kind = 1;
-        node->literal.float_val = atof(t.start);
-        node->type_info = type_new(TYPE_F64);
+        node = parse_float_literal(t);
     }
     else if (t.type == TOK_STRING)
     {
-        node = ast_create(NODE_EXPR_LITERAL);
-        node->literal.type_kind = TOK_STRING;
-        node->literal.string_val = xmalloc(t.len);
-        strncpy(node->literal.string_val, t.start + 1, t.len - 2);
-        node->literal.string_val[t.len - 2] = 0;
-        node->type_info = type_new(TYPE_STRING);
+        node = parse_string_literal(t);
     }
     else if (t.type == TOK_FSTRING)
     {
-        char *inner = xmalloc(t.len);
-        strncpy(inner, t.start + 2, t.len - 3);
-        inner[t.len - 3] = 0;
-        node = create_fstring_block(ctx, inner);
-        free(inner);
+        node = parse_fstring_literal(ctx, t);
     }
     else if (t.type == TOK_CHAR)
     {
-        node = ast_create(NODE_EXPR_LITERAL);
-        node->literal.type_kind = TOK_CHAR;
-        node->literal.string_val = token_strdup(t);
-        node->type_info = type_new(TYPE_I8);
+        node = parse_char_literal(t);
     }
 
     else if (t.type == TOK_SIZEOF)
     {
-        if (lexer_peek(l).type != TOK_LPAREN)
-        {
-            zpanic_at(lexer_peek(l), "Expected ( after sizeof");
-        }
-        lexer_next(l);
-
-        int pos = l->pos;
-        int col = l->col;
-        int line = l->line;
-        Type *ty = parse_type_formal(ctx, l);
-
-        if (ty->kind != TYPE_UNKNOWN && lexer_peek(l).type == TOK_RPAREN)
-        {
-            lexer_next(l);
-            char *ts = type_to_string(ty);
-            node = ast_create(NODE_EXPR_SIZEOF);
-            node->size_of.target_type = ts;
-            node->size_of.expr = NULL;
-            node->type_info = type_new(TYPE_USIZE);
-        }
-        else
-        {
-            l->pos = pos;
-            l->col = col;
-            l->line = line;
-            ASTNode *ex = parse_expression(ctx, l);
-            if (lexer_next(l).type != TOK_RPAREN)
-            {
-                zpanic_at(lexer_peek(l), "Expected ) after sizeof identifier");
-            }
-            node = ast_create(NODE_EXPR_SIZEOF);
-            node->size_of.target_type = NULL;
-            node->size_of.expr = ex;
-            node->type_info = type_new(TYPE_USIZE);
-        }
+        node = parse_sizeof_expr(ctx, l);
     }
 
     else if (t.type == TOK_IDENT && strncmp(t.start, "typeof", 6) == 0 && t.len == 6)
     {
-        if (lexer_peek(l).type != TOK_LPAREN)
-        {
-            zpanic_at(lexer_peek(l), "Expected ( after typeof");
-        }
-        lexer_next(l);
-
-        int pos = l->pos;
-        int col = l->col;
-        int line = l->line;
-        Type *ty = parse_type_formal(ctx, l);
-
-        if (ty->kind != TYPE_UNKNOWN && lexer_peek(l).type == TOK_RPAREN)
-        {
-            lexer_next(l);
-            char *ts = type_to_string(ty);
-            node = ast_create(NODE_TYPEOF);
-            node->size_of.target_type = ts;
-            node->size_of.expr = NULL;
-        }
-        else
-        {
-            l->pos = pos;
-            l->col = col;
-            l->line = line;
-            ASTNode *ex = parse_expression(ctx, l);
-            if (lexer_next(l).type != TOK_RPAREN)
-            {
-                zpanic_at(lexer_peek(l), "Expected ) after typeof expression");
-            }
-            node = ast_create(NODE_TYPEOF);
-            node->size_of.target_type = NULL;
-            node->size_of.expr = ex;
-        }
+        node = parse_typeof_expr(ctx, l);
     }
 
     else if (t.type == TOK_AT)
     {
-        Token ident = lexer_next(l);
-        if (ident.type != TOK_IDENT)
-        {
-            zpanic_at(ident, "Expected intrinsic name after @");
-        }
-
-        int kind = -1;
-        if (strncmp(ident.start, "type_name", 9) == 0 && ident.len == 9)
-        {
-            kind = 0;
-        }
-        else if (strncmp(ident.start, "fields", 6) == 0 && ident.len == 6)
-        {
-            kind = 1;
-        }
-        else
-        {
-            zpanic_at(ident, "Unknown intrinsic @%.*s", ident.len, ident.start);
-        }
-
-        {
-            Token t = lexer_next(l);
-            if (t.type != TOK_LPAREN)
-            {
-                zpanic_at(t, "Expected ( after intrinsic");
-            }
-        }
-
-        Type *target = parse_type_formal(ctx, l);
-
-        {
-            Token t = lexer_next(l);
-            if (t.type != TOK_RPAREN)
-            {
-                zpanic_at(t, "Expected ) after intrinsic type");
-            }
-        }
-
-        node = ast_create(NODE_REFLECTION);
-        node->reflection.kind = kind;
-        node->reflection.target_type = target;
-        node->type_info = (kind == 0) ? type_new(TYPE_STRING) : type_new_ptr(type_new(TYPE_VOID));
+        node = parse_intrinsic(ctx, l);
     }
 
     else if (t.type == TOK_IDENT && strncmp(t.start, "match", 5) == 0 && t.len == 5)
