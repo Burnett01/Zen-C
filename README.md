@@ -48,6 +48,7 @@ Join the discussion, share demos, ask questions, or report bugs in the official 
         - [Type Aliases](#type-aliases)
     - [4. Functions & Lambdas](#4-functions--lambdas)
         - [Functions](#functions)
+        - [Default Arguments](#default-arguments)
         - [Lambdas (Closures)](#lambdas-closures)
         - [Variadic Functions](#variadic-functions)
     - [5. Control Flow](#5-control-flow)
@@ -234,6 +235,32 @@ fn add(a: int, b: int) -> int {
 
 // Named arguments supported in calls
 add(a: 10, b: 20);
+```
+
+#### Default Arguments
+Functions can define default values for trailing arguments. These can be literals, expressions, or valid Zen C code (like struct constructors).
+```zc
+// Simple default value
+fn increment(val: int, amount: int = 1) -> int {
+    return val + amount;
+}
+
+// Expression default value (evaluated at call site)
+fn offset(val: int, pad: int = 10 * 2) -> int {
+    return val + pad;
+}
+
+// Struct default value
+struct Config { debug: bool; }
+fn init(cfg: Config = Config { debug: true }) {
+    if cfg.debug { println "Debug Mode"; }
+}
+
+fn main() {
+    increment(10);      // 11
+    offset(5);          // 25
+    init();             // Prints "Debug Mode"
+}
 ```
 
 #### Lambdas (Closures)

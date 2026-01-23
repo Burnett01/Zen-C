@@ -1376,19 +1376,20 @@ char *process_printf_sugar(ParserContext *ctx, const char *content, int newline,
         }
 
         expr = final_expr;
-        char *allocated_expr = NULL;
         clean_expr = final_expr;
 
-        int skip_rewrite = 0;
+        // Parse expression fully
+        Lexer lex;
+        lexer_init(&lex, clean_expr);
+        ASTNode *expr_node = parse_expression(ctx, &lex);
 
-        // Check if struct and has to_string (Robust Logic)
+        char *rw_expr = NULL;
+        int used_codegen = 0;
+
+        if (expr_node)
         {
-            Lexer lex;
-            lexer_init(&lex, clean_expr);
-            // Parse using temporary lexer to check type
-            ASTNode *expr_node = parse_expression(ctx, &lex);
-
-            if (expr_node && expr_node->type_info)
+            // Check for to_string conversion on struct types
+            if (expr_node->type_info)
             {
                 Type *t = expr_node->type_info;
                 char *struct_name = NULL;
@@ -1410,47 +1411,52 @@ char *process_printf_sugar(ParserContext *ctx, const char *content, int newline,
                     sprintf(mangled, "%s__to_string", struct_name);
                     if (find_func(ctx, mangled))
                     {
-                        char *inner_wrapped = xmalloc(strlen(clean_expr) + 5);
-                        sprintf(inner_wrapped, "#{%s}", clean_expr);
-                        char *inner_c = rewrite_expr_methods(ctx, inner_wrapped);
-                        free(inner_wrapped);
-
-                        // Now wrap in to_string call using C99 compound literal for safety
-                        char *new_expr = xmalloc(strlen(inner_c) + strlen(mangled) + 64);
-                        if (is_ptr)
+                        char *inner_c = NULL;
+                        size_t len = 0;
+                        FILE *ms = open_memstream(&inner_c, &len);
+                        if (ms)
                         {
-                            sprintf(new_expr, "%s(%s)", mangled, inner_c);
-                        }
-                        else
-                        {
-                            sprintf(new_expr, "%s(({ %s _z_tmp = (%s); &_z_tmp; }))", mangled,
-                                    struct_name, inner_c);
+                            codegen_expression(ctx, expr_node, ms);
+                            fclose(ms);
                         }
 
-                        if (expr != s)
+                        if (inner_c)
                         {
-                            free(expr); // Free if explicitly allocated
+                            char *new_expr = xmalloc(strlen(inner_c) + strlen(mangled) + 64);
+                            if (is_ptr)
+                            {
+                                sprintf(new_expr, "%s(%s)", mangled, inner_c);
+                            }
+                            else
+                            {
+                                sprintf(new_expr, "%s(({ %s _z_tmp = (%s); &_z_tmp; }))", mangled,
+                                        struct_name, inner_c);
+                            }
+                            rw_expr = new_expr;
+                            free(inner_c);
                         }
-                        expr = new_expr;
-                        skip_rewrite = 1; // Don't rewrite again on the C99 syntax
                     }
+                }
+            }
+
+            if (!rw_expr)
+            {
+                char *buf = NULL;
+                size_t len = 0;
+                FILE *ms = open_memstream(&buf, &len);
+                if (ms)
+                {
+                    codegen_expression(ctx, expr_node, ms);
+                    fclose(ms);
+                    rw_expr = buf;
+                    used_codegen = 1;
                 }
             }
         }
 
-        // Rewrite the expression to handle pointer access (header_ptr.magic ->
-        // header_ptr->magic)
-        char *rw_expr;
-        if (skip_rewrite)
+        if (!rw_expr)
         {
-            rw_expr = xstrdup(expr);
-        }
-        else
-        {
-            char *wrapped_expr = xmalloc(strlen(expr) + 5);
-            sprintf(wrapped_expr, "#{%s}", expr);
-            rw_expr = rewrite_expr_methods(ctx, wrapped_expr);
-            free(wrapped_expr);
+            rw_expr = xstrdup(expr); // Fallback
         }
 
         if (fmt)
@@ -1466,11 +1472,10 @@ char *process_printf_sugar(ParserContext *ctx, const char *content, int newline,
         }
         else
         {
-            // Auto-detect format based on type if possible
             const char *format_spec = NULL;
-            char *inferred_type = find_symbol_type(ctx, clean_expr); // Simple variable lookup
+            Type *t = expr_node ? expr_node->type_info : NULL;
+            char *inferred_type = t ? type_to_string(t) : find_symbol_type(ctx, clean_expr);
 
-            // Basic Type Mappings
             if (inferred_type)
             {
                 if (strcmp(inferred_type, "int") == 0 || strcmp(inferred_type, "i32") == 0 ||
@@ -1506,6 +1511,10 @@ char *process_printf_sugar(ParserContext *ctx, const char *content, int newline,
                 else if (strstr(inferred_type, "*"))
                 {
                     format_spec = "%p"; // Pointer
+                }
+                if (t)
+                {
+                    free(inferred_type);
                 }
             }
 
@@ -1549,10 +1558,13 @@ char *process_printf_sugar(ParserContext *ctx, const char *content, int newline,
             }
         }
 
-        free(rw_expr); // Don't forget to free!
-        if (allocated_expr)
+        if (rw_expr && used_codegen)
         {
-            free(allocated_expr); // Don't forget to free the auto-generated call!
+            free(rw_expr);
+        }
+        else if (rw_expr && !used_codegen)
+        {
+            free(rw_expr);
         }
 
         cur = p + 1;

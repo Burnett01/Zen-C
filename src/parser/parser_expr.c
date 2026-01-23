@@ -2093,8 +2093,10 @@ ASTNode *parse_primary(ParserContext *ctx, Lexer *l)
             {
                 if (sig->defaults[i])
                 {
-                    ASTNode *def = ast_create(NODE_RAW_STMT);
-                    def->raw_stmt.content = xstrdup(sig->defaults[i]);
+                    Lexer def_l;
+                    lexer_init(&def_l, sig->defaults[i]);
+                    ASTNode *def = parse_expression(ctx, &def_l);
+
                     if (!head)
                     {
                         head = def;
