@@ -12,3 +12,25 @@ test "test_generics_struct" {
     
     println "Wrapper Int: {w1.item} (ID: {w1.id})";    
 }
+
+struct RcInner<T> {
+    value: T;
+    ref_count: usize;
+}
+
+struct Rc<T> {
+    inner: RcInner<T>*;
+}
+
+impl Rc<T> {
+    fn new(value: T) -> Self {
+        var inner: RcInner<T>* = 0;
+        return Self {
+            inner: inner
+        };
+    }
+}
+
+test "test_rc_pointer_instantiation" {
+    var value = Rc<i32>::new(4);
+}
