@@ -12,7 +12,6 @@
 #include "zprep_plugin.h"
 
 // Emit literal expression (int, float, string, char)
-// Emit literal expression (int, float, string, char)
 static void codegen_literal_expr(ASTNode *node, FILE *out)
 {
     if (node->literal.type_kind == LITERAL_STRING)
@@ -1034,6 +1033,7 @@ void codegen_expression(ParserContext *ctx, ASTNode *node, FILE *out)
         }
 
         int is_zen_struct = 0;
+        int is_union = 0;
         StructRef *sr = ctx->parsed_structs_list;
         while (sr)
         {
@@ -1041,6 +1041,10 @@ void codegen_expression(ParserContext *ctx, ASTNode *node, FILE *out)
                 strcmp(sr->node->strct.name, struct_name) == 0)
             {
                 is_zen_struct = 1;
+                if (sr->node->strct.is_union)
+                {
+                    is_union = 1;
+                }
                 break;
             }
             sr = sr->next;
@@ -1048,7 +1052,14 @@ void codegen_expression(ParserContext *ctx, ASTNode *node, FILE *out)
 
         if (is_zen_struct)
         {
-            fprintf(out, "(struct %s){", struct_name);
+            if (is_union)
+            {
+                fprintf(out, "(union %s){", struct_name);
+            }
+            else
+            {
+                fprintf(out, "(struct %s){", struct_name);
+            }
         }
         else
         {
