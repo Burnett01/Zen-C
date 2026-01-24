@@ -2095,6 +2095,119 @@ ASTNode *parse_primary(ParserContext *ctx, Lexer *l)
 
                     ASTNode *arg = parse_expression(ctx, l);
 
+                    // Implicit trait cast logic
+                    if (sig && args_provided < sig->total_args && arg)
+                    {
+                        Type *expected = sig->arg_types[args_provided];
+
+                        if (expected && expected->name && is_trait(expected->name))
+                        {
+                            // Check if we are passing a struct pointer
+                            Type *arg_type =
+                                arg->type_info
+                                    ? arg->type_info
+                                    : ((arg->type == NODE_EXPR_VAR)
+                                           ? find_symbol_type_info(ctx, arg->var_ref.name)
+                                           : NULL);
+
+                            if (!arg_type && arg->type == NODE_EXPR_UNARY &&
+                                strcmp(arg->unary.op, "&") == 0)
+                            {
+                                // Handle &struct
+                                if (arg->unary.operand->type == NODE_EXPR_VAR)
+                                {
+                                    Type *inner = find_symbol_type_info(
+                                        ctx, arg->unary.operand->var_ref.name);
+                                    if (inner && inner->kind == TYPE_STRUCT)
+                                    {
+                                        if (check_impl(ctx, expected->name, inner->name))
+                                        {
+                                            // FOUND MATCH: &Struct -> Trait
+                                            // Construct Trait Object: (Trait){.self = arg, .vtable
+                                            // = &_Struct_Trait_VTable}
+
+                                            ASTNode *init = ast_create(NODE_EXPR_STRUCT_INIT);
+                                            init->struct_init.struct_name = xstrdup(expected->name);
+
+                                            Type *trait_type = type_new(TYPE_STRUCT);
+                                            trait_type->name = xstrdup(expected->name);
+                                            init->type_info = trait_type;
+
+                                            // Field: self
+                                            ASTNode *f_self = ast_create(NODE_VAR_DECL);
+                                            f_self->var_decl.name = xstrdup("self");
+                                            f_self->var_decl.init_expr = arg;
+
+                                            // Field: vtable
+                                            char vtable_name[256];
+                                            sprintf(vtable_name, "%s_%s_VTable", inner->name,
+                                                    expected->name);
+
+                                            ASTNode *vtable_var = ast_create(NODE_EXPR_VAR);
+                                            vtable_var->var_ref.name = xstrdup(vtable_name);
+
+                                            ASTNode *vtable_ref = ast_create(NODE_EXPR_UNARY);
+                                            vtable_ref->unary.op = xstrdup("&");
+                                            vtable_ref->unary.operand = vtable_var;
+
+                                            ASTNode *f_vtable = ast_create(NODE_VAR_DECL);
+                                            f_vtable->var_decl.name = xstrdup("vtable");
+                                            f_vtable->var_decl.init_expr = vtable_ref;
+
+                                            f_self->next = f_vtable;
+                                            init->struct_init.fields = f_self;
+
+                                            arg = init;
+                                        }
+                                    }
+                                }
+                            }
+                            else if (arg_type && arg_type->kind == TYPE_POINTER &&
+                                     arg_type->inner && arg_type->inner->kind == TYPE_STRUCT)
+                            {
+                                // Pointer variable or expression
+                                if (check_impl(ctx, expected->name, arg_type->inner->name))
+                                {
+                                    // Construct Trait Object: (Trait){.self = arg, .vtable =
+                                    // &_Struct_Trait_VTable}
+
+                                    ASTNode *init = ast_create(NODE_EXPR_STRUCT_INIT);
+                                    init->struct_init.struct_name = xstrdup(expected->name);
+
+                                    Type *trait_type = type_new(TYPE_STRUCT);
+                                    trait_type->name = xstrdup(expected->name);
+                                    init->type_info = trait_type;
+
+                                    // Field: self
+                                    ASTNode *f_self = ast_create(NODE_VAR_DECL);
+                                    f_self->var_decl.name = xstrdup("self");
+                                    f_self->var_decl.init_expr = arg;
+
+                                    // Field: vtable
+                                    char vtable_name[256];
+                                    sprintf(vtable_name, "%s_%s_VTable", arg_type->inner->name,
+                                            expected->name);
+
+                                    ASTNode *vtable_var = ast_create(NODE_EXPR_VAR);
+                                    vtable_var->var_ref.name = xstrdup(vtable_name);
+
+                                    ASTNode *vtable_ref = ast_create(NODE_EXPR_UNARY);
+                                    vtable_ref->unary.op = xstrdup("&");
+                                    vtable_ref->unary.operand = vtable_var;
+
+                                    ASTNode *f_vtable = ast_create(NODE_VAR_DECL);
+                                    f_vtable->var_decl.name = xstrdup("vtable");
+                                    f_vtable->var_decl.init_expr = vtable_ref;
+
+                                    f_self->next = f_vtable;
+                                    init->struct_init.fields = f_self;
+
+                                    arg = init;
+                                }
+                            }
+                        }
+                    }
+
                     // Move Semantics Logic (Added for known funcs)
                     check_move_usage(ctx, arg, arg ? arg->token : t1);
                     if (arg && arg->type == NODE_EXPR_VAR)
@@ -2158,6 +2271,100 @@ ASTNode *parse_primary(ParserContext *ctx, Lexer *l)
                     Lexer def_l;
                     lexer_init(&def_l, sig->defaults[i]);
                     ASTNode *def = parse_expression(ctx, &def_l);
+
+                    // Implicit trait cast logic for default values
+                    Type *expected = sig->arg_types[i];
+                    if (expected && expected->name && is_trait(expected->name))
+                    {
+                        Type *arg_type = def->type_info
+                                             ? def->type_info
+                                             : ((def->type == NODE_EXPR_VAR)
+                                                    ? find_symbol_type_info(ctx, def->var_ref.name)
+                                                    : NULL);
+
+                        if (!arg_type && def->type == NODE_EXPR_UNARY &&
+                            strcmp(def->unary.op, "&") == 0)
+                        {
+                            if (def->unary.operand->type == NODE_EXPR_VAR)
+                            {
+                                Type *inner =
+                                    find_symbol_type_info(ctx, def->unary.operand->var_ref.name);
+                                if (inner && inner->kind == TYPE_STRUCT)
+                                {
+                                    if (check_impl(ctx, expected->name, inner->name))
+                                    {
+                                        ASTNode *init = ast_create(NODE_EXPR_STRUCT_INIT);
+                                        init->struct_init.struct_name = xstrdup(expected->name);
+
+                                        Type *trait_type = type_new(TYPE_STRUCT);
+                                        trait_type->name = xstrdup(expected->name);
+                                        init->type_info = trait_type;
+
+                                        ASTNode *f_self = ast_create(NODE_VAR_DECL);
+                                        f_self->var_decl.name = xstrdup("self");
+                                        f_self->var_decl.init_expr = def;
+
+                                        char vtable_name[256];
+                                        sprintf(vtable_name, "%s_%s_VTable", inner->name,
+                                                expected->name);
+
+                                        ASTNode *vtable_var = ast_create(NODE_EXPR_VAR);
+                                        vtable_var->var_ref.name = xstrdup(vtable_name);
+
+                                        ASTNode *vtable_ref = ast_create(NODE_EXPR_UNARY);
+                                        vtable_ref->unary.op = xstrdup("&");
+                                        vtable_ref->unary.operand = vtable_var;
+
+                                        ASTNode *f_vtable = ast_create(NODE_VAR_DECL);
+                                        f_vtable->var_decl.name = xstrdup("vtable");
+                                        f_vtable->var_decl.init_expr = vtable_ref;
+
+                                        f_self->next = f_vtable;
+                                        init->struct_init.fields = f_self;
+
+                                        def = init;
+                                    }
+                                }
+                            }
+                        }
+                        else if (arg_type && arg_type->kind == TYPE_POINTER && arg_type->inner &&
+                                 arg_type->inner->kind == TYPE_STRUCT)
+                        {
+                            if (check_impl(ctx, expected->name, arg_type->inner->name))
+                            {
+                                ASTNode *init = ast_create(NODE_EXPR_STRUCT_INIT);
+                                init->struct_init.struct_name = xstrdup(expected->name);
+
+                                Type *trait_type = type_new(TYPE_STRUCT);
+                                trait_type->name = xstrdup(expected->name);
+                                init->type_info = trait_type;
+
+                                ASTNode *f_self = ast_create(NODE_VAR_DECL);
+                                f_self->var_decl.name = xstrdup("self");
+                                f_self->var_decl.init_expr = def;
+
+                                char vtable_name[256];
+                                sprintf(vtable_name, "%s_%s_VTable", arg_type->inner->name,
+                                        expected->name);
+
+                                ASTNode *vtable_var = ast_create(NODE_EXPR_VAR);
+                                vtable_var->var_ref.name = xstrdup(vtable_name);
+
+                                ASTNode *vtable_ref = ast_create(NODE_EXPR_UNARY);
+                                vtable_ref->unary.op = xstrdup("&");
+                                vtable_ref->unary.operand = vtable_var;
+
+                                ASTNode *f_vtable = ast_create(NODE_VAR_DECL);
+                                f_vtable->var_decl.name = xstrdup("vtable");
+                                f_vtable->var_decl.init_expr = vtable_ref;
+
+                                f_self->next = f_vtable;
+                                init->struct_init.fields = f_self;
+
+                                def = init;
+                            }
+                        }
+                    }
 
                     if (!head)
                     {
